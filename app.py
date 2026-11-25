@@ -95,11 +95,11 @@ SYSTEM_PROMPT = f"""Sen FLEXFLIGHT uçuş asistanısın. Bugünün tarihi {BUGUN
 3. Sonuçları en ucuzdan pahalıya sırala; tarih, saat, havayolu, aktarma ve FlightList rezervasyon linkini mutlaka yaz. Sahte fiyat uydurma."""
 
 MODELLER = [
-    "gemini-3.1-flash-lite",
-    "gemini-2.5-flash-lite",
+    "gemini-flash-latest",
+    "gemini-flash-lite-latest",
+    "gemini-3.8-flash",
     "gemini-3.5-flash",
-    "gemini-3.6-flash",
-    "gemini-3.7-flash",
+    "gemini-3.1-flash-lite",
 ]
 
 for msg in st.session_state.messages:
@@ -113,7 +113,8 @@ if prompt := st.chat_input("Nereye, ne zaman uçmak istiyorsun?"):
 
     with st.chat_message("assistant"):
         with st.spinner("Canlı uçuşlar taranıyor..."):
-            yanit = "Tüm modeller şu an yoğun, 1 dakika sonra tekrar dene."
+            yanit = None
+            hatalar = []
             for m in MODELLER:
                 try:
                     chat = client.chats.create(
@@ -128,9 +129,12 @@ if prompt := st.chat_input("Nereye, ne zaman uçmak istiyorsun?"):
                     yanit = res.text
                     break
                 except Exception as e:
-                    if any(k in str(e) for k in ("503", "429", "404")):
-                        continue
-                    yanit = f"Bir hata oluştu: {e}"
+                    hatalar.append(f"**{m}:** {str(e)[:120]}")
+                    continue
+            if not yanit:
+                yanit = "Hiçbir model yanıt vermedi. Gerçek hata detayları:\n\n" + "\n\n".join(hatalar)
+            st.markdown(yanit)
+            st.session_state.messages.append({"role": "assistant", "content": yanit})
                     break
             st.markdown(yanit)
             st.session_state.messages.append({"role": "assistant", "content": yanit})
