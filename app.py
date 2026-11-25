@@ -135,6 +135,3 @@ if prompt := st.chat_input("Nereye, ne zaman uçmak istiyorsun?"):
                 yanit = "Hiçbir model yanıt vermedi. Gerçek hata detayları:\n\n" + "\n\n".join(hatalar)
             st.markdown(yanit)
             st.session_state.messages.append({"role": "assistant", "content": yanit})
-                    break
-            st.markdown(yanit)
-            st.session_state.messages.append({"role": "assistant", "content": yanit})
