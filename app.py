@@ -136,7 +136,7 @@ if prompt := st.chat_input("Nereye, ne zaman uçmak istiyorsun?"):
                 yanit = "Sonuç alınamadı."
                 for _ in range(8):
                     resp = client.chat.completions.create(
-                        model="openai/gpt-oss-120b",",
+                        model="openai/gpt-oss-120b",
                         messages=api_msgs,
                         tools=TOOLS,
                         tool_choice="auto",
