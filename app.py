@@ -49,7 +49,9 @@ def call_mcp_tool(name, args):
             st.session_state.mcp_sid = None
             ensure_mcp()
             res = mcp_request("tools/call", {"name": name, "arguments": clean_args})
-        return json.dumps(res.get("result", res), ensure_ascii=False)[:6000]
+        content = res.get("result", {}).get("content", [])
+        metin = "\n".join(c.get("text", "") for c in content if c.get("type") == "text")
+        return metin if metin else json.dumps(res.get("result", res), ensure_ascii=False)[:3500]
     except Exception as e:
         return json.dumps({"error": str(e)}, ensure_ascii=False)
 
