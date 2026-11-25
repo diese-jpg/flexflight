@@ -2,15 +2,13 @@ import json
 import datetime
 import httpx
 import streamlit as st
-from google import genai
-from google.genai import types
+from groq import Groq
 
 st.set_page_config(page_title="FLEXFLIGHT", page_icon="✈️", layout="centered")
 st.title("✈️ FLEXFLIGHT")
 st.caption("Örnek: 'Ocak ayında SAW çıkışlı Cuma gidiş Pazar dönüş en ucuz 5 Avrupa bileti'")
 
-API_KEY = st.secrets["GEMINI_API_KEY"]
-client = genai.Client(api_key=API_KEY)
+client = Groq(api_key=st.secrets["GROQ_API_KEY"])
 MCP_URL = "https://www.flightlist.io/mcp"
 
 if "mcp_sid" not in st.session_state:
@@ -55,53 +53,72 @@ def call_mcp_tool(name, args):
     except Exception as e:
         return json.dumps({"error": str(e)}, ensure_ascii=False)
 
-def search_locations(query: str, locale: str = "tr") -> str:
-    """Şehir, havalimanı, ülke veya bölge ID'sini bulur."""
-    return call_mcp_tool("search_locations", {"query": query, "locale": locale})
-
-def search_flights(
-    from_place: str,
-    to_place: str = None,
-    trip: str = "round_trip",
-    depart_from: str = None,
-    depart_to: str = None,
-    return_from: str = None,
-    return_to: str = None,
-    nights_from: int = None,
-    nights_to: int = None,
-    max_stops: int = None,
-    max_price: int = None,
-    currency: str = "TRY",
-    locale: str = "tr"
-) -> str:
-    """Canlı en ucuz uçuşları arar. Anywhere için to_place boş bırak."""
-    return call_mcp_tool("search_flights", {
-        "from": from_place, "to": to_place, "trip": trip,
-        "depart_from": depart_from, "depart_to": depart_to,
-        "return_from": return_from, "return_to": return_to,
-        "nights_from": nights_from, "nights_to": nights_to,
-        "max_stops": max_stops, "max_price": max_price,
-        "currency": currency, "locale": locale
-    })
-
-def route_facts(origin: str, destination: str, locale: str = "tr") -> str:
-    """İki şehir/ülke arası genel fiyat ve en ucuz ay bilgisini getirir."""
-    return call_mcp_tool("route_facts", {"origin": origin, "destination": destination, "locale": locale})
+TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "search_locations",
+            "description": "Şehir, havalimanı, ülke veya bölge ID'sini bulur. Arama yapmadan önce mutlaka kullan.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Yer adı veya kodu (Örn: Istanbul, SAW, Schengen, Kazakhstan)"},
+                    "locale": {"type": "string", "default": "tr"}
+                },
+                "required": ["query"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_flights",
+            "description": "Canlı en ucuz uçuşları arar. Anywhere için 'to' alanını boş bırak.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "from": {"type": "string", "description": "Kalkış ID (search_locations'dan gelen)"},
+                    "to": {"type": "string", "description": "Varış ID (Anywhere için boş bırak)"},
+                    "trip": {"type": "string", "enum": ["one_way", "round_trip"]},
+                    "depart_from": {"type": "string", "description": "YYYY-MM-DD"},
+                    "depart_to": {"type": "string", "description": "YYYY-MM-DD"},
+                    "return_from": {"type": "string", "description": "YYYY-MM-DD"},
+                    "return_to": {"type": "string", "description": "YYYY-MM-DD"},
+                    "nights_from": {"type": "integer"},
+                    "nights_to": {"type": "integer"},
+                    "max_stops": {"type": "integer"},
+                    "max_price": {"type": "integer"},
+                    "depart_time": {"type": "string", "enum": ["morning", "afternoon", "evening", "night"]},
+                    "currency": {"type": "string", "default": "TRY"},
+                    "locale": {"type": "string", "default": "tr"}
+                },
+                "required": ["from"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "route_facts",
+            "description": "İki şehir/ülke arası genel fiyat ve en ucuz ay bilgisini getirir.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "origin": {"type": "string"},
+                    "destination": {"type": "string"},
+                    "locale": {"type": "string", "default": "tr"}
+                },
+                "required": ["origin", "destination"]
+            }
+        }
+    }
+]
 
 BUGUN = datetime.date.today().isoformat()
 SYSTEM_PROMPT = f"""Sen FLEXFLIGHT uçuş asistanısın. Bugünün tarihi {BUGUN}.
 1. Önce mutlaka search_locations ile kalkış ve varış ID'lerini bul.
 2. En fazla 5 adet search_flights çağrısı yap, sistemi boğma.
-3. Sonuçları en ucuzdan pahalıya sırala; tarih, saat, havayolu, aktarma ve FlightList rezervasyon linkini mutlaka yaz. Sahte fiyat uydurma."""
-
-MODELLER = [
-    "gemini-3.7-flash",
-    "gemini-3.6-flash",
-    "gemini-3.5-flash-lite",
-    "gemini-2.5-flash-lite",
-    "gemini-3.8-flash",
-    "gemini-3.1-flash-lite",
-]
+3. Sonuçları en ucuzdan pahalıya sırala; tarih, saat, havayolu, aktarma ve FlightList rezervasyon linkini mutlaka paylaş. Sahte fiyat uydurma."""
 
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
@@ -114,25 +131,33 @@ if prompt := st.chat_input("Nereye, ne zaman uçmak istiyorsun?"):
 
     with st.chat_message("assistant"):
         with st.spinner("Canlı uçuşlar taranıyor..."):
-            yanit = None
-            hatalar = []
-            for m in MODELLER:
-                try:
-                    chat = client.chats.create(
-                        model=m,
-                        config=types.GenerateContentConfig(
-                            system_instruction=SYSTEM_PROMPT,
-                            tools=[search_locations, search_flights, route_facts],
-                            temperature=0.2,
-                        )
+            try:
+                api_msgs = [{"role": "system", "content": SYSTEM_PROMPT}] + st.session_state.messages[-6:]
+                yanit = "Sonuç alınamadı."
+                for _ in range(8):
+                    resp = client.chat.completions.create(
+                        model="llama-3.3-70b-versatile",
+                        messages=api_msgs,
+                        tools=TOOLS,
+                        tool_choice="auto",
+                        temperature=0.2,
                     )
-                    res = chat.send_message(prompt)
-                    yanit = res.text
-                    break
-                except Exception as e:
-                    hatalar.append(f"**{m}:** {str(e)[:120]}")
-                    continue
-            if not yanit:
-                yanit = "Hiçbir model yanıt vermedi. Gerçek hata detayları:\n\n" + "\n\n".join(hatalar)
+                    msg = resp.choices[0].message
+                    if msg.tool_calls:
+                        api_msgs.append(msg)
+                        for tc in msg.tool_calls:
+                            args = json.loads(tc.function.arguments or "{}")
+                            sonuc = call_mcp_tool(tc.function.name, args)
+                            api_msgs.append({
+                                "role": "tool",
+                                "tool_call_id": tc.id,
+                                "content": sonuc,
+                            })
+                    else:
+                        yanit = msg.content
+                        break
+            except Exception as e:
+                yanit = f"Bir hata oluştu: {e}"
+
             st.markdown(yanit)
             st.session_state.messages.append({"role": "assistant", "content": yanit})
